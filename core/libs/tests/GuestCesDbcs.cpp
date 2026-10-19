@@ -11,6 +11,9 @@ void* APS5_VABI sceCesUcsProfileInitEucJpCp51932(void*);
 int APS5_VABI sceCesEucKrToUtf8(const void*, const std::uint8_t*, std::uint32_t, std::uint32_t*, std::uint8_t*, std::uint32_t, std::uint32_t*);
 int APS5_VABI sceCesUhcToUtf8(const void*, const std::uint8_t*, std::uint32_t, std::uint32_t*, std::uint8_t*, std::uint32_t, std::uint32_t*);
 int APS5_VABI sceCesBig5ToUtf8(const void*, const std::uint8_t*, std::uint32_t, std::uint32_t*, std::uint8_t*, std::uint32_t, std::uint32_t*);
+int APS5_VABI sceCesEucKrToUcs2(const void*, const std::uint8_t*, std::uint32_t, std::uint32_t*, std::uint16_t*);
+int APS5_VABI sceCesUhcToUcs2(const void*, const std::uint8_t*, std::uint32_t, std::uint32_t*, std::uint16_t*);
+int APS5_VABI sceCesBig5ToUcs2(const void*, const std::uint8_t*, std::uint32_t, std::uint32_t*, std::uint16_t*);
 int APS5_VABI sceCesMbcsUcsContextInit(void*, const void*);
 int APS5_VABI sceCesUtf8StrToMbcsStr(void*, const std::uint8_t*, std::uint32_t, std::uint32_t*, std::uint8_t*, std::uint32_t, std::uint32_t*);
 int APS5_VABI sceCesMbcsStrToUtf8Str(void*, const std::uint8_t*, std::uint32_t, std::uint32_t*, std::uint8_t*, std::uint32_t, std::uint32_t*);
@@ -19,6 +22,7 @@ int APS5_VABI sceCesMbcsStrToUcs2Str(void*, const std::uint8_t*, std::uint32_t, 
 }
 
 using ToUtf8 = int (APS5_VABI*)(const void*, const std::uint8_t*, std::uint32_t, std::uint32_t*, std::uint8_t*, std::uint32_t, std::uint32_t*);
+using ToUcs2 = int (APS5_VABI*)(const void*, const std::uint8_t*, std::uint32_t, std::uint32_t*, std::uint16_t*);
 
 constexpr int invalidParameter = static_cast<int>(0x805C0001);
 constexpr int invalidSrcBuffer = static_cast<int>(0x805C0010);
@@ -62,6 +66,22 @@ static void RequireScalar(ToUtf8 convert, const void* profile, const char* sourc
     std::uint32_t produced = 0;
     Require(convert(profile, Bytes(source), Size(source), &consumed, utf8, sizeof(utf8), &produced) == 0);
     Require(consumed == Size(source) && produced == Size(expected) && std::memcmp(utf8, expected, produced) == 0);
+}
+
+static void RequireUcs2(ToUcs2 convert, const void* profile, const char* source, std::uint16_t expected, std::uint32_t sourceMax = 0) {
+    if (sourceMax == 0) sourceMax = static_cast<std::uint32_t>(std::strlen(source));
+    std::uint32_t read = 77;
+    std::uint16_t output = 0xFFFF;
+    Require(convert(profile, Bytes(source), sourceMax, &read, &output) == 0);
+    Require(read == sourceMax && output == expected);
+}
+
+static int Ucs2(ToUcs2 convert, const void* profile, const char* source, std::uint32_t sourceMax) {
+    std::uint32_t read = 77;
+    std::uint16_t output = 0x5555;
+    const int result = convert(profile, source ? Bytes(source) : nullptr, sourceMax, &read, &output);
+    if (result != 0) Require(read == 77 && output == 0x5555);
+    return result;
 }
 
 static int Scalar(ToUtf8 convert, const void* profile, const char* source, std::uint32_t sourceMax, std::uint32_t utf8Max) {
@@ -134,6 +154,11 @@ int main() {
     RequireScalar(sceCesUhcToUtf8, uhc, "\x8C\x63", "\xEB\x98\xA0");
     RequireScalar(sceCesBig5ToUtf8, big5, "\xA4\xA4", "\xE4\xB8\xAD");
     RequireScalar(sceCesBig5ToUtf8, big5, "A", "A");
+    RequireUcs2(sceCesEucKrToUcs2, eucKr, "\xB0\xA1", 0xAC00);
+    RequireUcs2(sceCesEucKrToUcs2, eucKr, "A", 'A');
+    RequireUcs2(sceCesUhcToUcs2, uhc, "\x8C\x63", 0xB620);
+    RequireUcs2(sceCesBig5ToUcs2, big5, "\xA4\xA4", 0x4E2D);
+    RequireUcs2(sceCesBig5ToUcs2, big5, "\0", 0, 1);
     std::uint8_t zero[4] = {0x55, 0x55, 0x55, 0x55};
     Require(sceCesUhcToUtf8(uhc, Bytes("\0"), 1, nullptr, zero, sizeof(zero), nullptr) == 0 && zero[0] == 0 && zero[1] == 0x55);
 
@@ -156,6 +181,18 @@ int main() {
     Require(Scalar(sceCesBig5ToUtf8, big5, "\x81\x40", 2, 4) == unassignedCode);
     Require(Scalar(sceCesBig5ToUtf8, big5, "\xFA\x40", 2, 4) == unassignedCode);
     Require(sceCesEucKrToUtf8(eucKr, Bytes("\xB0\xA1"), 2, nullptr, nullptr, 4, nullptr) == invalidDstBuffer);
+    Require(Ucs2(sceCesEucKrToUcs2, nullptr, "\xB0\xA1", 2) == invalidParameter);
+    Require(Ucs2(sceCesEucKrToUcs2, uhc, "\xB0\xA1", 2) == invalidParameter);
+    Require(Ucs2(sceCesUhcToUcs2, eucKr, "\xB0\xA1", 2) == invalidParameter);
+    Require(Ucs2(sceCesBig5ToUcs2, eucKr, "\xA4\xA4", 2) == invalidParameter);
+    Require(Ucs2(sceCesEucKrToUcs2, eucKr, nullptr, 2) == invalidSrcBuffer);
+    Require(Ucs2(sceCesEucKrToUcs2, eucKr, "", 0) == srcBufferEnd);
+    Require(Ucs2(sceCesUhcToUcs2, uhc, "\xB0", 1) == srcBufferEnd);
+    Require(Ucs2(sceCesBig5ToUcs2, big5, "\xA4", 1) == srcBufferEnd);
+    Require(Ucs2(sceCesEucKrToUcs2, eucKr, "\xB0\x5B", 2) == invalidEncode);
+    Require(Ucs2(sceCesUhcToUcs2, uhc, "\xC9\xA1", 2) == unassignedCode);
+    Require(Ucs2(sceCesBig5ToUcs2, big5, "\x81\x40", 2) == unassignedCode);
+    Require(sceCesBig5ToUcs2(big5, Bytes("\xA4\xA4"), 2, nullptr, nullptr) == invalidDstBuffer);
 
     alignas(8) std::uint8_t context[64] = {};
     Require(sceCesMbcsUcsContextInit(context, eucKr) == 0);

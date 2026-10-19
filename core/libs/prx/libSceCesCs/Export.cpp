@@ -430,6 +430,19 @@ int mbcsToUtf8(bool accepted, const void* profile, const uint8_t* mbcs, uint32_t
     return 0;
 }
 
+int mbcsToUcs2(bool accepted, const void* profile, const uint8_t* mbcs, uint32_t mbcsMax, uint32_t* mbcsLen, uint16_t* ucs2) {
+    if (!accepted) return CES_ERROR_INVALID_PARAMETER;
+    if (!mbcs) return CES_ERROR_INVALID_SRC_BUFFER;
+    if (mbcsMax == 0) return CES_ERROR_SRC_BUFFER_END;
+    if (!ucs2) return CES_ERROR_INVALID_DST_BUFFER;
+    uint32_t consumed = 0;
+    uint32_t code = 0;
+    if (const int result = decodeMbcs(profile, mbcs, mbcsMax, consumed, code); result != 0) return result;
+    *ucs2 = static_cast<uint16_t>(code);
+    if (mbcsLen) *mbcsLen = consumed;
+    return 0;
+}
+
 }
 
 extern "C" {
@@ -528,6 +541,18 @@ int APS5_VABI sceCesEucJpToUcs2(const void* profile, const uint8_t* euc, uint32_
     *ucs2 = static_cast<uint16_t>(code);
     if (eucSize) *eucSize = length;
     return 0;
+}
+
+int APS5_VABI sceCesEucKrToUcs2(const void* profile, const uint8_t* euc, uint32_t eucMax, uint32_t* eucSize, uint16_t* ucs2) {
+    return mbcsToUcs2(isEucKr(profile), profile, euc, eucMax, eucSize, ucs2);
+}
+
+int APS5_VABI sceCesUhcToUcs2(const void* profile, const uint8_t* uhc, uint32_t uhcMax, uint32_t* uhcSize, uint16_t* ucs2) {
+    return mbcsToUcs2(isUhc(profile), profile, uhc, uhcMax, uhcSize, ucs2);
+}
+
+int APS5_VABI sceCesBig5ToUcs2(const void* profile, const uint8_t* big5, uint32_t big5Max, uint32_t* big5Size, uint16_t* ucs2) {
+    return mbcsToUcs2(isBig5(profile), profile, big5, big5Max, big5Size, ucs2);
 }
 
 int APS5_VABI sceCesSbcToUtf8(const uint8_t* profile, uint8_t sbc, uint8_t* utf8, uint32_t utf8max, uint32_t* utf8_len) {
