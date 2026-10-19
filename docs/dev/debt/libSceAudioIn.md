@@ -7,6 +7,7 @@
 ### Unknown function info
 
 - [sceAudioInIsPadEmbeddedMic](../../../core/libs/prx/libSceAudioIn/Export.cpp) (libSceAudioIn) - name from its NID (`X+4jdIS75P0`); signature `int32_t(int32_t handle)` from the Ghost of Yotei (PPSA26344) call site in #2355; the result's meaning is unconfirmed, so it still throws rather than invent one
+- [sceAudioInGetGain, sceAudioInGetRerouteCount](../../../core/libs/prx/libSceAudioIn/Export.cpp) (libSceAudioIn) - the unofficial [SharpProspero binding](https://github.com/SvenGDK/SharpProspero/blob/60977b29103452b9681ae10c7a9011d44965bf16/src/SharpProspero/Interop/Audio/AudioIn.cs) declares `int(int, float*)` and `int(int)`, and describes gain and device-reroute behavior, but gives no provenance or hardware validation. No direct PS5 call site or authoritative reference was found. The current declarations remain assumptions; both still throw until independently verified.
 
 ### Functional
 

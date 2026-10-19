@@ -17,6 +17,8 @@ int APS5_VABI sceAudioInOpen(int, std::uint32_t, std::uint32_t, std::uint32_t, s
 int APS5_VABI sceAudioInHqOpen(int, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t);
 int APS5_VABI sceAudioInAsyncOpen(int, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t);
 int32_t APS5_VABI sceAudioInIsPadEmbeddedMic(int32_t);
+int32_t APS5_VABI sceAudioInGetGain(int32_t, float*);
+int32_t APS5_VABI sceAudioInGetRerouteCount(int32_t);
 int APS5_VABI sceAudioInInput(int, void*);
 int APS5_VABI sceAudioInGetSilentState(int);
 int APS5_VABI sceAudioInClose(int);
@@ -79,6 +81,9 @@ void TestValidation() {
     port = sceAudioInAsyncOpen(user, 0, 0, 384, 48000, 0x10);
     Require(port > 0 && sceAudioInClose(port) == 0);
     Require(ReportsNotImplemented("sceAudioInIsPadEmbeddedMic", [] { sceAudioInIsPadEmbeddedMic(1); }));
+    float gain = 1.0f;
+    Require(ReportsNotImplemented("sceAudioInGetGain", [&] { sceAudioInGetGain(1, &gain); }));
+    Require(ReportsNotImplemented("sceAudioInGetRerouteCount", [] { sceAudioInGetRerouteCount(1); }));
 }
 
 void InputSound(int handle, std::vector<std::int16_t>& block) {
