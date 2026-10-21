@@ -91,6 +91,37 @@ static int Utf8ToMbcs(void* context, const char* utf8) {
     return sceCesUtf8StrToMbcsStr(context, Bytes(utf8), Size(utf8), &read, mbcs, sizeof(mbcs), &written);
 }
 
+static void CheckBig5UserDefined(const void* profile, void* context) {
+    struct Character {
+        std::uint16_t encoded;
+        std::uint16_t unicode;
+    };
+    constexpr Character characters[] = {
+        {0xFA40, 0xE000}, {0xFA7E, 0xE03E}, {0xFAA1, 0xE03F}, {0xFEFE, 0xE310},
+        {0x8E40, 0xE311}, {0xA0FE, 0xEEB7}, {0x8140, 0xEEB8}, {0x817E, 0xEEF6},
+        {0x81A1, 0xEEF7}, {0x8DFE, 0xF6B0}, {0xC6A1, 0xF6B1}, {0xC6FE, 0xF70E},
+        {0xC740, 0xF70F}, {0xC77E, 0xF74D}, {0xC7A1, 0xF74E}, {0xC8FE, 0xF848},
+    };
+    for (const auto& character : characters) {
+        const std::uint8_t encoded[] = {static_cast<std::uint8_t>(character.encoded >> 8), static_cast<std::uint8_t>(character.encoded)};
+        std::uint16_t decoded = 0;
+        std::uint32_t consumed = 0, produced = 0;
+        Require(sceCesMbcsStrToUcs2Str(context, encoded, sizeof(encoded), &consumed, &decoded, 1, &produced) == 0);
+        Require(consumed == 2 && produced == 1 && decoded == character.unicode);
+        std::uint8_t back[2] = {};
+        Require(sceCesUcs2StrToMbcsStr(context, &character.unicode, 1, &consumed, back, sizeof(back), &produced) == 0);
+        Require(consumed == 1 && produced == 2 && std::memcmp(back, encoded, sizeof(back)) == 0);
+    }
+    Require(Scalar(sceCesBig5ToUtf8, profile, "\x81\x40", 1, 4) == srcBufferEnd);
+    Require(Scalar(sceCesBig5ToUtf8, profile, "\xFA\x40", 1, 4) == srcBufferEnd);
+    Require(Scalar(sceCesBig5ToUtf8, profile, "\xC6\xA1", 1, 4) == srcBufferEnd);
+    Require(Scalar(sceCesBig5ToUtf8, profile, "\x81\x7F", 2, 4) == invalidEncode);
+    Require(Scalar(sceCesBig5ToUtf8, profile, "\xFA\x80", 2, 4) == invalidEncode);
+    Require(Scalar(sceCesBig5ToUtf8, profile, "\x81\x40", 2, 2) == dstBufferEnd);
+    Require(Utf8ToMbcs(context, reinterpret_cast<const char*>(u8"\uF849")) == unassignedCode);
+    Require(Utf8ToMbcs(context, reinterpret_cast<const char*>(u8"\uF8F8")) == unassignedCode);
+}
+
 static std::uint32_t RoundTripMismatches(void* context) {
     std::uint32_t mismatches = 0;
     for (std::uint32_t lead = 0x81; lead < 0xFF; ++lead) {
@@ -126,7 +157,7 @@ int main() {
 
     RequireTable(sceCesEucKrToUtf8, eucKr, 0x01FF720E36F4AD67ull, 8226);
     RequireTable(sceCesUhcToUtf8, uhc, 0x3B861A7E911985ABull, 17048);
-    RequireTable(sceCesBig5ToUtf8, big5, 0xE4D0D6A8019F35D9ull, 13503);
+    RequireTable(sceCesBig5ToUtf8, big5, 0xD579CA3C56275633ull, 19720);
 
     RequireScalar(sceCesEucKrToUtf8, eucKr, "\xB0\xA1", "\xEA\xB0\x80");
     RequireScalar(sceCesEucKrToUtf8, eucKr, "\xA2\xE6", "\xE2\x82\xAC");
@@ -153,8 +184,6 @@ int main() {
     Require(Scalar(sceCesUhcToUtf8, uhc, "\xC7\x41", 2, 4) == unassignedCode);
     Require(Scalar(sceCesBig5ToUtf8, big5, "\xA4\x80", 2, 4) == invalidEncode);
     Require(Scalar(sceCesBig5ToUtf8, big5, "\xFF\xA1", 2, 4) == invalidEncode);
-    Require(Scalar(sceCesBig5ToUtf8, big5, "\x81\x40", 2, 4) == unassignedCode);
-    Require(Scalar(sceCesBig5ToUtf8, big5, "\xFA\x40", 2, 4) == unassignedCode);
     Require(sceCesEucKrToUtf8(eucKr, Bytes("\xB0\xA1"), 2, nullptr, nullptr, 4, nullptr) == invalidDstBuffer);
 
     alignas(8) std::uint8_t context[64] = {};
@@ -170,6 +199,7 @@ int main() {
     Require(RoundTripMismatches(context) == 0);
 
     Require(sceCesMbcsUcsContextInit(context, big5) == 0);
+    CheckBig5UserDefined(big5, context);
     RequireString(context, "\xA4\xA4\xA4\xE5", "\xE4\xB8\xAD\xE6\x96\x87");
     RequireString(context, "\xF9\xF9\xA2\x7E\xA4\x51\xA4\xCA", "\xE2\x95\x90\xE2\x95\xAD\xE5\x8D\x81\xE5\x8D\x85");
     RequireString(context, "\xF9\xE9\xF9\xEB\xF9\xEA\xA2\xA1\xA2\xA3\xA2\xA2", "\xE2\x95\x9E\xE2\x95\xA1\xE2\x95\xAA\xE2\x95\xAE\xE2\x95\xAF\xE2\x95\xB0");

@@ -192,6 +192,28 @@ int decodeCp949(bool unified, const uint8_t* mbcs, uint32_t mbcsMax, uint32_t& l
     return code != 0 ? 0 : CES_ERROR_UNASSIGNED_CODE;
 }
 
+constexpr uint32_t CP950_TRAILS_PER_LEAD = 157;
+
+uint32_t cp950TrailIndex(uint8_t trail) {
+    return trail < 0xA1 ? trail - 0x40 : trail - 0xA1 + 63;
+}
+
+uint32_t decodeCp950Eudc(uint8_t lead, uint8_t trail) {
+    const uint32_t index = cp950TrailIndex(trail);
+    if (lead >= 0x81 && lead <= 0x8D) {
+        return 0xEEB8 + (lead - 0x81) * CP950_TRAILS_PER_LEAD + index;
+    }
+    if (lead >= 0x8E && lead <= 0xA0) {
+        return 0xE311 + (lead - 0x8E) * CP950_TRAILS_PER_LEAD + index;
+    }
+    if (lead >= 0xFA && lead <= 0xFE) {
+        return 0xE000 + (lead - 0xFA) * CP950_TRAILS_PER_LEAD + index;
+    }
+    if ((lead == 0xC6 && trail >= 0xA1) || lead == 0xC7 || lead == 0xC8)
+        return 0xF6B1 + (lead - 0xC6) * CP950_TRAILS_PER_LEAD + index - 63;
+    return 0;
+}
+
 int decodeCp950(const uint8_t* mbcs, uint32_t mbcsMax, uint32_t& length, uint32_t& code) {
     const uint8_t lead = mbcs[0];
     if (lead < 0x80) {
@@ -203,9 +225,10 @@ int decodeCp950(const uint8_t* mbcs, uint32_t mbcsMax, uint32_t& length, uint32_
     if (mbcsMax < 2) return CES_ERROR_SRC_BUFFER_END;
     const uint8_t trail = mbcs[1];
     if (trail < 0x40 || (trail > 0x7E && trail < 0xA1) || trail == 0xFF) return CES_ERROR_INVALID_ENCODE;
-    if (lead < 0xA1 || lead > 0xF9) return CES_ERROR_UNASSIGNED_CODE;
     length = 2;
-    code = Cp950::TO_UCS2[(lead - 0xA1) * 157 + (trail < 0xA1 ? trail - 0x40 : trail - 0xA1 + 63)];
+    code = decodeCp950Eudc(lead, trail);
+    if (code == 0 && lead >= 0xA1 && lead <= 0xF9)
+        code = Cp950::TO_UCS2[(lead - 0xA1) * CP950_TRAILS_PER_LEAD + cp950TrailIndex(trail)];
     return code != 0 ? 0 : CES_ERROR_UNASSIGNED_CODE;
 }
 
@@ -233,10 +256,14 @@ const std::vector<DbcsCell>& cp949Reverse() {
 const std::vector<DbcsCell>& cp950Reverse() {
     static const auto reverse = [] {
         std::vector<DbcsCell> entries;
-        for (uint32_t cell = 0; cell < 89 * 157; ++cell) {
-            const uint32_t column = cell % 157;
-            const uint32_t trail = column < 63 ? 0x40 + column : 0xA1 + column - 63;
-            if (Cp950::TO_UCS2[cell] != 0) entries.push_back({Cp950::TO_UCS2[cell], static_cast<uint16_t>((0xA1 + cell / 157) << 8 | trail)});
+        for (uint32_t lead = 0x81; lead <= 0xFE; ++lead) {
+            for (uint32_t column = 0; column < CP950_TRAILS_PER_LEAD; ++column) {
+                const uint8_t trail = column < 63 ? 0x40 + column : 0xA1 + column - 63;
+                uint32_t code = decodeCp950Eudc(static_cast<uint8_t>(lead), trail);
+                if (code == 0 && lead >= 0xA1 && lead <= 0xF9)
+                    code = Cp950::TO_UCS2[(lead - 0xA1) * CP950_TRAILS_PER_LEAD + column];
+                if (code != 0) entries.push_back({static_cast<uint16_t>(code), static_cast<uint16_t>((lead << 8) | trail)});
+            }
         }
         std::stable_sort(entries.begin(), entries.end(), byCode);
         std::vector<DbcsCell> unique;
