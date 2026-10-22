@@ -10,6 +10,11 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <cerrno>
+#include <cfenv>
+#include <clocale>
+#include <exception>
+#include <locale.h>
 
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/SonyCrt.hpp"
@@ -32,6 +37,84 @@ size_t Length(const char16_t* s) {
     while (s[length] != 0) ++length;
     return length;
 }
+
+struct FloatingState {
+    int error = errno;
+    std::fenv_t environment{};
+
+    FloatingState() { std::fegetenv(&environment); }
+    ~FloatingState() {
+        std::fesetenv(&environment);
+        errno = error;
+    }
+};
+
+class ThreadCLocale {
+public:
+    ThreadCLocale() {
+        const FloatingState state;
+#ifdef _WIN32
+        const char* current = std::setlocale(LC_ALL, nullptr);
+        if (current == nullptr) throw std::runtime_error("Cannot query the host locale for guest numeric parsing");
+        previousLocale = current;
+        previousMode = _configthreadlocale(_ENABLE_PER_THREAD_LOCALE);
+        if (previousMode == -1) throw std::runtime_error("Cannot enable the per-thread host locale for guest numeric parsing");
+        if (std::setlocale(LC_ALL, "C") == nullptr) {
+            if (_configthreadlocale(previousMode) == -1) std::terminate();
+            throw std::runtime_error("Cannot select the C host locale for guest numeric parsing");
+        }
+        active = true;
+#else
+        temporaryLocale = newlocale(LC_ALL_MASK, "C", nullptr);
+        if (temporaryLocale == nullptr) throw std::runtime_error("Cannot create the C host locale for guest numeric parsing");
+        previousLocale = uselocale(temporaryLocale);
+        if (previousLocale == nullptr) {
+            freelocale(temporaryLocale);
+            temporaryLocale = nullptr;
+            throw std::runtime_error("Cannot select the C host locale for guest numeric parsing");
+        }
+        active = true;
+#endif
+    }
+
+    void Restore() {
+        if (!active) return;
+        const FloatingState state;
+#ifdef _WIN32
+        if (std::setlocale(LC_ALL, previousLocale.c_str()) == nullptr)
+            throw std::runtime_error("Cannot restore the host locale after guest numeric parsing");
+        if (_configthreadlocale(previousMode) == -1)
+            throw std::runtime_error("Cannot restore the host locale mode after guest numeric parsing");
+#else
+        if (uselocale(previousLocale) == nullptr)
+            throw std::runtime_error("Cannot restore the host locale after guest numeric parsing");
+        freelocale(temporaryLocale);
+        temporaryLocale = nullptr;
+#endif
+        active = false;
+    }
+
+    ~ThreadCLocale() {
+        try {
+            Restore();
+        } catch (...) {
+            std::terminate();
+        }
+    }
+
+    ThreadCLocale(const ThreadCLocale&) = delete;
+    ThreadCLocale& operator=(const ThreadCLocale&) = delete;
+
+private:
+#ifdef _WIN32
+    std::string previousLocale;
+    int previousMode = -1;
+#else
+    locale_t previousLocale = nullptr;
+    locale_t temporaryLocale = nullptr;
+#endif
+    bool active = false;
+};
 
 std::string AsciiPrefix(const char16_t* text) {
     std::string prefix;
@@ -175,7 +258,7 @@ auto ParseAsciiPrefix(const char16_t* text, char16_t** end, TParse parse) {
 }
 
 template<typename TFloat>
-TFloat ParseFloat(const char* text, char** end, TFloat (*parse)(const char*, char**)) {
+TFloat ParseFloatSubject(const char* text, char** end, TFloat (*parse)(const char*, char**)) {
     if (const NanSubject subject = FindNanSubject(text); subject.tail != nullptr) {
         const char* stop = subject.tail;
         const TFloat value = NanValue<TFloat>(subject, stop);
@@ -188,6 +271,14 @@ TFloat ParseFloat(const char* text, char** end, TFloat (*parse)(const char*, cha
     if (errno == ERANGE && value != 0 && (value < 0 ? -value : value) < std::numeric_limits<TFloat>::min()) errno = saved;
     if (end != nullptr) *end = parsedEnd;
     return parsedEnd == text ? TFloat{0} : value;
+}
+
+template<typename TFloat>
+TFloat ParseFloat(const char* text, char** end, TFloat (*parse)(const char*, char**)) {
+    ThreadCLocale scope;
+    const TFloat value = ParseFloatSubject<TFloat>(text, end, parse);
+    scope.Restore();
+    return value;
 }
 
 }
