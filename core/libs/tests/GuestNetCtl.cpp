@@ -51,6 +51,9 @@ int APS5_VABI sceNetCtlRegisterCallbackV6(NetCtlCallback, void*, int*);
 void APS5_VABI sceNetCtlTerm(void);
 int APS5_VABI sceNetCtlUnregisterCallback(int);
 int APS5_VABI sceNetCtlUnregisterCallbackV6(int);
+int APS5_VABI sceNetCtlRegisterCallbackForNpToolkit(NetCtlCallback, void*, int*);
+int APS5_VABI sceNetCtlUnregisterCallbackForNpToolkit(int);
+int APS5_VABI sceNetCtlCheckCallbackForNpToolkit(void);
 }
 
 namespace {
@@ -76,6 +79,7 @@ Delivery g_first;
 Delivery g_second;
 Delivery g_v6;
 Delivery g_self;
+Delivery g_npToolkit;
 int g_selfUnregister = -1;
 
 void APS5_VABI RecordFirst(int event, void* arg) {
@@ -101,6 +105,46 @@ void APS5_VABI UnregisterSelf(int event, void* arg) {
     g_self.event = event;
     g_self.arg = arg;
     g_selfUnregister = sceNetCtlUnregisterCallback(*static_cast<int*>(arg));
+}
+
+void APS5_VABI RecordNpToolkit(int event, void* arg) {
+    ++g_npToolkit.calls;
+    g_npToolkit.event = event;
+    g_npToolkit.arg = arg;
+}
+
+void CheckNpToolkitCallbacks() {
+    int state = -1;
+    Require(sceNetCtlGetState(&state) == 0);
+    const int event = state == kStateIpObtained ? kEventIpObtained : kEventDisconnected;
+    int probe = 0;
+    const int firstCalls = g_first.calls;
+
+    Require(sceNetCtlRegisterCallbackForNpToolkit(nullptr, &probe, &probe) == kErrInvalidAddr);
+    Require(sceNetCtlRegisterCallbackForNpToolkit(RecordNpToolkit, &probe, nullptr) == kErrInvalidAddr);
+    int ids[8] = {};
+    for (int index = 0; index < 8; ++index) {
+        Require(sceNetCtlRegisterCallbackForNpToolkit(RecordNpToolkit, &probe, &ids[index]) == 0 && ids[index] == index);
+    }
+    int extra = -1;
+    Require(sceNetCtlRegisterCallbackForNpToolkit(RecordNpToolkit, &probe, &extra) == static_cast<int>(0x80412103));
+    for (int index = 1; index < 8; ++index) Require(sceNetCtlUnregisterCallbackForNpToolkit(ids[index]) == 0);
+
+    int ipv4 = -1;
+    Require(sceNetCtlRegisterCallback(RecordFirst, &probe, &ipv4) == 0 && ipv4 == 0);
+    Require(sceNetCtlCheckCallbackForNpToolkit() == 0);
+    Require(g_npToolkit.calls == 1 && g_npToolkit.event == event && g_npToolkit.arg == &probe);
+    Require(g_first.calls == firstCalls);
+    Require(sceNetCtlCheckCallbackForNpToolkit() == 0);
+    Require(g_npToolkit.calls == 1);
+    Require(sceNetCtlCheckCallback() == 0);
+    Require(g_first.calls == firstCalls + 1 && g_npToolkit.calls == 1);
+
+    Require(sceNetCtlUnregisterCallbackForNpToolkit(-1) == static_cast<int>(0x80412105));
+    Require(sceNetCtlUnregisterCallbackForNpToolkit(8) == static_cast<int>(0x80412105));
+    Require(sceNetCtlUnregisterCallbackForNpToolkit(ids[0]) == 0);
+    Require(sceNetCtlUnregisterCallbackForNpToolkit(ids[0]) == static_cast<int>(0x80412104));
+    Require(sceNetCtlUnregisterCallback(ipv4) == 0);
 }
 
 void CheckCallbacks() {
@@ -274,6 +318,9 @@ int main() {
 #endif
     constexpr int notInitialized = static_cast<int>(0x80412101);
     Require(sceNetCtlCheckCallback() == notInitialized);
+    Require(sceNetCtlCheckCallbackForNpToolkit() == notInitialized);
+    Require(sceNetCtlRegisterCallbackForNpToolkit(nullptr, nullptr, nullptr) == notInitialized);
+    Require(sceNetCtlUnregisterCallbackForNpToolkit(-1) == notInitialized);
     Require(sceNetCtlGetState(nullptr) == notInitialized);
     Require(sceNetCtlGetStateV6(nullptr) == notInitialized);
     Require(sceNetCtlGetInfo(0, nullptr) == notInitialized);
@@ -287,6 +334,7 @@ int main() {
     Require(sceNetCtlCheckCallback() == notInitialized);
     Require(sceNetCtlInit() == 0);
     CheckCallbacks();
+    CheckNpToolkitCallbacks();
 
     Require(sceNetCtlGetStateV6(nullptr) == kErrInvalidAddr);
     int stateV6 = -1;
