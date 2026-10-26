@@ -107,7 +107,9 @@ std::size_t capture(SDL_AudioDeviceID device, std::uint8_t* dest, std::size_t by
     std::array<std::uint8_t, 4096> discard;
     for (std::size_t excess = queued > bytes * MAX_QUEUED_BLOCKS ? queued - bytes * MAX_QUEUED_BLOCKS : 0; excess > 0;) {
         const auto chunk = static_cast<Uint32>(std::min(excess, discard.size()));
-        excess -= SDL_DequeueAudio(device, discard.data(), chunk);
+        const auto dequeued = SDL_DequeueAudio(device, discard.data(), chunk);
+        if (dequeued == 0) break;
+        excess -= dequeued;
     }
     return SDL_DequeueAudio(device, dest, static_cast<Uint32>(bytes));
 }

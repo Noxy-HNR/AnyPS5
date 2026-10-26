@@ -17,4 +17,15 @@ if(BUILD_TESTING)
         set_tests_properties(guest_audio_in_capture guest_audio_in_no_device PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceAudioIn>")
     endif()
+
+    add_test_executable(audio_in_queue_progress_tests ${LIBS_INCLUDE_DIR}/tests/AudioInQueueProgress.cpp)
+    target_include_directories(audio_in_queue_progress_tests PRIVATE ${LIBS_INCLUDE_DIR} ${ANYPS5_SDL2_INCLUDE_DIR})
+    target_link_libraries(audio_in_queue_progress_tests PRIVATE SDL2-static libc)
+    configure_windows_unwind(audio_in_queue_progress_tests)
+    add_test(NAME audio_in_queue_progress COMMAND audio_in_queue_progress_tests)
+    set_tests_properties(audio_in_queue_progress PROPERTIES TIMEOUT 5)
+    if(WIN32)
+        set_tests_properties(audio_in_queue_progress PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
 endif()
