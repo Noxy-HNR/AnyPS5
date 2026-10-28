@@ -18,10 +18,15 @@ static std::uint8_t g_pattern = 0xAB;
 static std::size_t g_excessRemaining = 0;
 static void* g_destination = nullptr;
 static bool g_zeroOnDiscard = false;
+static SDL_AudioStatus g_deviceStatus = SDL_AUDIO_PLAYING;
 
 static Uint32 SDLCALL MockGetQueuedAudioSize(SDL_AudioDeviceID) {
     ++g_getQueuedCalls;
     return g_queuedSize;
+}
+
+static SDL_AudioStatus SDLCALL MockGetAudioDeviceStatus(SDL_AudioDeviceID) {
+    return g_deviceStatus;
 }
 
 static Uint32 SDLCALL MockDequeueAudio(SDL_AudioDeviceID, void* data, Uint32 len) {
@@ -40,11 +45,13 @@ static Uint32 SDLCALL MockDequeueAudio(SDL_AudioDeviceID, void* data, Uint32 len
 
 #define SDL_GetQueuedAudioSize(...) MockGetQueuedAudioSize(__VA_ARGS__)
 #define SDL_DequeueAudio(...) MockDequeueAudio(__VA_ARGS__)
+#define SDL_GetAudioDeviceStatus(...) MockGetAudioDeviceStatus(__VA_ARGS__)
 
 #include "prx/libSceAudioIn/Export.cpp"
 
 #undef SDL_GetQueuedAudioSize
 #undef SDL_DequeueAudio
+#undef SDL_GetAudioDeviceStatus
 
 static void ResetMocks() {
     g_getQueuedCalls = 0;
@@ -52,6 +59,7 @@ static void ResetMocks() {
     g_excessRemaining = 0;
     g_destination = nullptr;
     g_zeroOnDiscard = false;
+    g_deviceStatus = SDL_AUDIO_PLAYING;
 }
 
 static void Require(bool value) {
@@ -93,6 +101,63 @@ int main() {
     Require(g_dequeueCalls > 2);
     for (std::size_t i = 0; i < 37; ++i) Require(buffer[i] == g_pattern);
     Require(buffer[37] == sentinel);
+
+    ResetMocks();
+    g_queuedSize = static_cast<Uint32>(bytes * 5);
+    g_excessRemaining = g_queuedSize - static_cast<Uint32>(bytes * 4);
+    g_destination = buffer.data();
+    g_zeroOnDiscard = true;
+    g_deviceStatus = SDL_AUDIO_STOPPED;
+    g_finalBytes = 37;
+    g_pattern = 0x6B;
+    for (auto& b : buffer) b = sentinel;
+    returned = capture(1, buffer.data(), bytes, std::chrono::steady_clock::now());
+    Require(returned == 37);
+    Require(g_dequeueCalls == 2);
+    for (std::size_t i = 0; i < 37; ++i) Require(buffer[i] == g_pattern);
+    Require(buffer[37] == sentinel);
+
+    ResetMocks();
+    g_queuedSize = static_cast<Uint32>(bytes * 5);
+    g_excessRemaining = g_queuedSize - static_cast<Uint32>(bytes * 4);
+    g_destination = buffer.data();
+    g_zeroOnDiscard = true;
+    g_finalBytes = 0;
+    for (auto& b : buffer) b = sentinel;
+    g_ports[0] = {true, false, 256, 4, 1, Clock::duration::zero(), {}};
+    Require(sceAudioInInput(1, buffer.data()) == 256);
+    Require(!g_ports[0].busy);
+    Require(g_dequeueCalls == 2);
+    for (std::size_t i = 0; i < bytes; ++i) Require(buffer[i] == 0);
+    Require(buffer[bytes] == sentinel);
+    g_ports[0] = {};
+
+    ResetMocks();
+    g_queuedSize = static_cast<Uint32>(bytes * 5);
+    g_excessRemaining = g_queuedSize - static_cast<Uint32>(bytes * 4);
+    g_destination = buffer.data();
+    g_zeroOnDiscard = true;
+    g_deviceStatus = SDL_AUDIO_STOPPED;
+    g_finalBytes = 0;
+    for (auto& b : buffer) b = sentinel;
+    g_ports[0] = {true, false, 256, 4, 1, Clock::duration::zero(), {}};
+    bool threw = false;
+    try {
+        (void)sceAudioInInput(1, buffer.data());
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    Require(threw);
+    Require(!g_ports[0].busy);
+    Require(g_dequeueCalls == 2);
+    for (const auto value : buffer) Require(value == sentinel);
+    g_zeroOnDiscard = false;
+    g_deviceStatus = SDL_AUDIO_PLAYING;
+    g_queuedSize = static_cast<Uint32>(bytes);
+    g_finalBytes = 37;
+    Require(sceAudioInInput(1, buffer.data()) == 256);
+    Require(!g_ports[0].busy);
+    g_ports[0] = {};
 
     std::puts("audio input queue checks passed");
     return 0;
