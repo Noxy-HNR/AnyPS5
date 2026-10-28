@@ -42,7 +42,12 @@ public:
     FfmpegDecoder(AVCodecID id, std::int32_t wordSize, std::vector<std::uint8_t> extradata = {}) : wordSize(wordSize), extradata(std::move(extradata)), id(id) {
         static const bool quiet = (av_log_set_level(AV_LOG_QUIET), true);
         (void)quiet;
-        open();
+        try {
+            open();
+        } catch (...) {
+            avcodec_free_context(&context);
+            throw;
+        }
     }
 
     ~FfmpegDecoder() override { avcodec_free_context(&context); }
