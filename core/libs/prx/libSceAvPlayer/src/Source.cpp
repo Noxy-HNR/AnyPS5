@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cerrno>
 #include <cstring>
 #include <limits>
 #include <optional>
@@ -114,17 +115,28 @@ private:
 
     static std::int64_t seek(void* opaque, std::int64_t offset, int whence) {
         auto* self = static_cast<FileReplacementStream*>(opaque);
-        if (whence & AVSEEK_SIZE) return static_cast<std::int64_t>(self->size);
-        std::int64_t base = 0;
+        if (whence & AVSEEK_SIZE) {
+            if (self->size > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) return AVERROR(EOVERFLOW);
+            return static_cast<std::int64_t>(self->size);
+        }
+        std::uint64_t base = 0;
         switch (whence & ~AVSEEK_FORCE) {
         case SEEK_SET: base = 0; break;
-        case SEEK_CUR: base = static_cast<std::int64_t>(self->position); break;
-        case SEEK_END: base = static_cast<std::int64_t>(self->size); break;
+        case SEEK_CUR: base = self->position; break;
+        case SEEK_END: base = self->size; break;
         default: return -1;
         }
-        const auto target = std::clamp<std::int64_t>(base + offset, 0, static_cast<std::int64_t>(self->size));
-        self->position = static_cast<std::uint64_t>(target);
-        return target;
+        std::uint64_t target;
+        if (offset >= 0) {
+            const auto positive = static_cast<std::uint64_t>(offset);
+            target = base >= self->size ? self->size : base + std::min(positive, self->size - base);
+        } else {
+            const auto magnitude = static_cast<std::uint64_t>(-(offset + 1)) + 1;
+            target = std::min(magnitude > base ? std::uint64_t{0} : base - magnitude, self->size);
+        }
+        if (target > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) return AVERROR(EOVERFLOW);
+        self->position = target;
+        return static_cast<std::int64_t>(target);
     }
 
     AvPlayerFileReplacement file;
