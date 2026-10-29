@@ -105,11 +105,20 @@ std::size_t capture(SDL_AudioDeviceID device, std::uint8_t* dest, std::size_t by
     while (SDL_GetQueuedAudioSize(device) < bytes && Clock::now() < deadline) PreciseSleepUs(1000);
     const std::size_t queued = SDL_GetQueuedAudioSize(device);
     std::array<std::uint8_t, 4096> discard;
+    bool stalled = false;
     for (std::size_t excess = queued > bytes * MAX_QUEUED_BLOCKS ? queued - bytes * MAX_QUEUED_BLOCKS : 0; excess > 0;) {
         const auto chunk = static_cast<Uint32>(std::min(excess, discard.size()));
-        excess -= SDL_DequeueAudio(device, discard.data(), chunk);
+        const auto dequeued = SDL_DequeueAudio(device, discard.data(), chunk);
+        if (dequeued == 0) {
+            stalled = true;
+            break;
+        }
+        excess -= dequeued;
     }
-    return SDL_DequeueAudio(device, dest, static_cast<Uint32>(bytes));
+    const auto captured = SDL_DequeueAudio(device, dest, static_cast<Uint32>(bytes));
+    if (stalled && captured == 0 && SDL_GetAudioDeviceStatus(device) == SDL_AUDIO_STOPPED)
+        throw std::runtime_error("sceAudioInInput: capture device stopped while trimming its queue");
+    return captured;
 }
 
 }
@@ -150,7 +159,13 @@ int APS5_VABI sceAudioInInput(int handle, void* dest) {
     auto* out = static_cast<std::uint8_t*>(dest);
     std::size_t captured = 0;
     if (device != 0) {
-        captured = capture(device, out, bytes, deadline);
+        try {
+            captured = capture(device, out, bytes, deadline);
+        } catch (...) {
+            lock.lock();
+            port->busy = false;
+            throw;
+        }
     } else {
         PreciseSleepUntil(wake);
     }
