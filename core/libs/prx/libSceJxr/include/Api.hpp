@@ -39,6 +39,7 @@ void APS5_VABI formatQuantizer_nid_postfix(void** quantizers, std::uint8_t mode,
                                            std::size_t position, std::int32_t shiftedUv, std::int32_t scaled);
 std::int32_t APS5_VABI getACPredMode_nid_postfix(void* macroblock, std::int32_t format);
 void APS5_VABI InitZigzagScan_nid_postfix(void* context);
+std::int32_t APS5_VABI setBitIOPointers_nid_postfix(void* codec);
 
 int APS5_VABI AllocateCodingContextDec_nid_postfix();
 int APS5_VABI CloseWS_List_nid_postfix();
@@ -137,7 +138,6 @@ int APS5_VABI initMRPtr_nid_postfix();
 int APS5_VABI initPostProc_nid_postfix();
 int APS5_VABI postProcBlock_nid_postfix();
 int APS5_VABI postProcMB_nid_postfix();
-int APS5_VABI setBitIOPointers_nid_postfix();
 int APS5_VABI setUniformQuantizer_nid_postfix();
 int APS5_VABI slideOneMBRow_nid_postfix();
 int APS5_VABI swapMRPtr_nid_postfix();
